@@ -19,6 +19,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <readline/readline.h>
 #include <readline/history.h>
 //Needed for functions such as stat.
@@ -76,48 +77,37 @@ int main(void)
 			PrintCommand(n, &cmd);
 		} else if (n==1){
 			PrintCommand(n, &cmd);
-			//Do good stuffz
-			//Find the paths on the system
-			char *path = getenv("PATH");
-			char *savedPath = path;
-			int stringStart = 0;
-			int stringEnd = 0;
-			int notFound = 1;
+			
+			// Seach PATH manually for the wanted binary
+			char path[strlen(getenv("PATH"))];
+			strcpy( path, getenv("PATH"));
+			printf("PATH is %s\n", path);
 			char *binary = *(cmd.pgm->pgmlist);
-			printf("%s \n", path);
-			while (notFound){
-				if (*savedPath == ':' || *savedPath == '\0'){
-					//Create a new string to extract the path into.
-					int stringLength = stringEnd-stringStart;
-					char subString[stringLength+1];
-					//Add the subPath into the new string.
-					memcpy(subString, &path[stringStart],stringLength);
-					subString[stringLength] = '\0';	
-printf("%s \n",subString);
-printf("%s \n", binary);
-					//Create a new string for the path+binary.
-					int newPathLength = strlen(binary)+strlen(subString);
-					char newPath[newPathLength+2];
-					//Create the path to the binary.
-					strcpy(newPath,subString);
-					strcat(newPath,"/");
-					strcat(newPath,binary);
-printf("%s \n",newPath);
-					//Check if the binary exist in the path.
-					notFound = access(newPath,F_OK);
-					if (!notFound) {
-						runProcess(newPath);
-					}
-					if (*savedPath == '\0') break;
-					//Increase stringStart to indicate the next path in PATH.
-					stringStart = 1+stringEnd;
-				}
-				stringEnd++;
-				savedPath++;
+			const char delimiter[2] = ":";
+			char *token = strtok(path, delimiter);
+			int notFound = 1;
+			
+			while(notFound)
+			{
+				notFound = fileExists(token = strtok(NULL,delimiter), binary);
 			}
-			if (notFound) printError();
+			if(token == NULL)
+			{
+				//The binary does not exit
+				printf("The binary does not exist");
+			}
+			else
+			{
+				//The binary exist and its path is in token
+				printf("The binary exists\n%s",token);
+				char fPath[strlen(path)+strlen(binary)];
+				strcat(fPath, token);
+				strcat(fPath, "/");
+				strcat(fPath, binary);
+				runProcess(fPath);
+			}
 		}	
-      }
+         }
     }
     
     if(line) {
@@ -196,17 +186,30 @@ stripwhite (char *string)
   string [++i] = '\0';
 }
 
+int fileExists(char* path, char* binaryName)
+{
+	// Concatenate arguments and check with access
+	if(path == NULL) return 0;
+	char fPath[strlen(path)+strlen(binaryName)];
+	strcat(fPath, path);
+	strcat(fPath, "/");
+	strcat(fPath, binaryName);
+	printf("Searching for  %s\n",fPath); 
+	return access(fPath, F_OK);
+}
+
 void printError(){
 	
 }
 
 void runProcess(char *path){
+	printf("Trying to run: %s \n", path);
 	int pid;
 	if (pid = fork()){
 		//Parent
 		wait(NULL);
 	} else {
 		//Child
-		execve(path,"\0");
+		//execve(path,"\0");
 	}
 }
