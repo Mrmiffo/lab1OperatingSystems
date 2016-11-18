@@ -58,8 +58,8 @@ int main(void)
   real_stdin = dup(STDIN_FILENO);
   real_stdout = dup(STDOUT_FILENO);
 
-   printf("SIGIN RETURNED %d\n",signal(SIGCHLD, signalHandler));
-  printf("SIGIN RETURNED %d\n", signal(SIGINT, signalHandler));
+   signal(SIGCHLD, signalHandler);
+  signal(SIGINT, signalHandler);
   while (!done) {
    
     char *line;
@@ -233,7 +233,7 @@ void execute(Pgm* pgm, int bg, int doPipe)
 		close(pipefd[1]);	
 	}
 	
-
+	if(bg) setsid(); 
 	execvp(*(pgm->pgmlist), pgm->pgmlist);
 	exit(0);
 	    break;
@@ -268,13 +268,6 @@ void signalHandler(int signalNumber)
 	case SIGCHLD:
 		wait(NULL);
 		break;
-	case SIGINT:
-		if(executing)
-		{
-			printf("Killing Pid %d\n", pid);
-			executing = 0;
-			kill(pid, SIGKILL);
-		}
 	default:
 		break;
 		//Not implemented
@@ -315,4 +308,5 @@ void changeDirectory(char* arg)
 	}
 
 }
+
 
