@@ -23,8 +23,8 @@
 #include <errno.h>
 #include <readline/readline.h>
 #include <readline/history.h>
-//Needed for functions such as stat.
 #include <unistd.h>
+#include <signal.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 //END
@@ -38,11 +38,13 @@ void PrintCommand(int, Command *);
 void PrintPgm(Pgm *);
 void stripwhite(char *);
 void execute(Pgm* pgm, int bg, int doPipe);
-
+void signalHandler(int signalNumber);
 /* When non-zero, this global means the user is done using this program. */
 int done = 0;
 int real_stdout;
 int real_stdin;
+int pid = 0;
+int executing = 0;
 /*
  * Name: main
  *
@@ -56,10 +58,10 @@ int main(void)
   real_stdin = dup(STDIN_FILENO);
   real_stdout = dup(STDOUT_FILENO);
 
+   printf("SIGIN RETURNED %d\n",signal(SIGCHLD, signalHandler));
+  printf("SIGIN RETURNED %d\n", signal(SIGINT, signalHandler));
   while (!done) {
-    // If any children are done, give them due recognition
-    waitpid(-1, NULL, WNOHANG);
-
+   
     char *line;
     line = readline("> ");
 
@@ -84,41 +86,33 @@ int main(void)
 			PrintCommand(n, &cmd);
 		} else if (n==1){
 			PrintCommand(n, &cmd);
-		/*	Pgm *pgm = (cmd.pgm);
-			while(pgm != NULL){
+			// If cd or exit do something else 
+			if(strcmp("cd",*cmd.pgm->pgmlist)==0)
+			{
+				changeDirectory(*(++cmd.pgm->pgmlist));
+				continue;
+			}
+			if(strcmp("exit",*cmd.pgm->pgmlist)==0)
+			{
+				exit(0);
+			}
+			FILE *input = NULL;
+			FILE *output= NULL;
+			if(cmd.rstdin)
+			{
+				input = fopen(cmd.rstdin, "r");
+				dup2(fileno(input), STDIN_FILENO );
 
-				// Seach PATH manually for the wanted binary
-				char path[strlen(getenv("PATH"))];
-				strcpy( path, getenv("PATH"));
-				char *binary = *(cmd.pgm->pgmlist);
-				const char delimiter[2] = ":";
-				char *token = strtok(path, delimiter);
-				int notFound = 1;
-			
-				while(notFound)
-				{
-					notFound = fileExists(token = strtok(NULL,delimiter), binary);
-				}
+			}
+			if(cmd.rstdout) 
+			{
+				output = fopen(cmd.rstdout, "w");
+				dup2(fileno(output), STDOUT_FILENO);
 
-				if(token == NULL)
-				{
-					//The binary does not exit
-					printf("The binary does not exist");
-				}
-				else
-				{
-					//The binary exist and its path is in token
-					char fPath[strlen(path)+strlen(binary)];
-					strcat(fPath, token);
-					strcat(fPath, "/");
-					strcat(fPath, binary);
-					runProcess(fPath, &pgm,
-							pgm->next == NULL ? 1 : 0,cmd.bakground); 
-				}
-				pgm = pgm->next;
-			}*/
-			// Write here
+			}
 			execute(cmd.pgm, cmd.bakground, 0);
+			if(input)  fclose(input);
+			if(output) fclose(output);
 		}	
          }
     }
@@ -210,62 +204,15 @@ int fileExists(char* path, char* binaryName)
 	return access(fPath, F_OK);
 }
 
-void printError(){
-	
-}
-
-void runProcess(char *path, Pgm *pgm, int output, int bg){
-	int pid;
-	int pipefd[2];
-	if (output == 0) pipe(pipefd);
-	
-	fprintf(stderr, "Executing %s\n", path);
-	fprintf(stderr, "Output is %d\n", output);
-	fprintf(stderr, "Bg is %d\n", bg);
-	if (pid = fork()){
-		//Parent
-		if(output == 0 )
-		{
-			close(pipefd[1]);
-			char buf[1024];
-			int readBytes = 0;
-				open(output);
-		
-			while(readBytes = read(pipefd[0], buf, 1024))
-			{
-				write(output, buf, readBytes);
-					
-			}
-			
-			close(pipefd[0]);	
-		}
-		if(!bg) wait(pid);
-		fflush(stdout);
-
-	} else {
-		//Child
-		if(output == 0)
-		{
-			close(STDOUT_FILENO);
-			close(pipefd[0]);
-			dup2(pipefd[1], 1);
-			close(pipefd[1]);
-
-		}
-		execv(path, pgm->pgmlist);
-	}
-}
 
 void execute(Pgm* pgm, int bg, int doPipe)
 {
 	if (pgm == NULL)
 	{
-		real_stdout = dup(1);
 		return;
 	}
 	execute(pgm->next, bg, 1);
 
-	int pid;
 	int pipefd[2];
 	if(doPipe) pipe(pipefd);
 	
@@ -288,31 +235,83 @@ void execute(Pgm* pgm, int bg, int doPipe)
 	
 
 	execvp(*(pgm->pgmlist), pgm->pgmlist);
+	exit(0);
 	    break;
-	default:
+	default: 
 	// PARENT
-		if(!bg) waitpid(pid);
-
+		if(!bg) 
+		{
+			executing = 1;
+			waitpid(pid);
+			executing = 0;
+		}
 		if(doPipe)
 		{
 			close(pipefd[1]);
 			dup2(pipefd[0], STDIN_FILENO);
-			//char buf[1024];
-			//int readBytes = 0;
-			/*while(readBytes = read(pipefd[0], buf, 1024))
-			{
-				write(0, buf, readBytes);
-					
-			}*/
 			close(pipefd[0]);
-			//dup2(real_stdout,1);
-			
+						
 		}
 		else
 		{
 			dup2(real_stdin, STDIN_FILENO );
 			dup2(real_stdout, STDOUT_FILENO);
 		}
+	}
+
+}
+
+void signalHandler(int signalNumber)
+{
+	switch(signalNumber)
+	{
+	case SIGCHLD:
+		wait(NULL);
+		break;
+	case SIGINT:
+		if(executing)
+		{
+			printf("Killing Pid %d\n", pid);
+			executing = 0;
+			kill(pid, SIGKILL);
+		}
+	default:
+		break;
+		//Not implemented
+	}
+}
+
+void changeDirectory(char* arg)
+{
+	if(strcmp("..",arg) == 0)
+	{
+		char cwd[1024];
+		getcwd(cwd, sizeof(cwd));
+		char *ptr = cwd;
+		int last=0;
+		while(*ptr!='\0')
+		{
+			if(*ptr == '/')
+				last = ptr-cwd;
+			ptr++;
+		}
+		cwd[last] = '\0';
+		chdir(cwd);
+
+	}
+	else if('/' == *arg)
+	{
+		chdir(arg);
+	}
+	else
+	{
+		char nPath[1024];
+		getcwd(nPath, sizeof(nPath));
+		strcat(nPath, "/");
+		strcat(nPath, arg);
+		int status = chdir(nPath);
+		if(status) 
+			fprintf(stderr, "lsh: cd: %s: No such file or directory\n", arg);
 	}
 
 }
