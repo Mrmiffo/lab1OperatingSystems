@@ -283,6 +283,7 @@ void changeDirectory(char* arg)
 {
 	if ('\0' == arg || '~' == *arg)
 	{
+		//If not argument or argument is ~ move to home dir.
 		struct passwd *pw = getpwuid(getuid());
 		chdir(pw->pw_dir);
 	}
