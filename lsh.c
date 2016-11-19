@@ -27,6 +27,8 @@
 #include <signal.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+//Include pwd.h to get home dir
+#include <pwd.h>
 //END
 #include "parse.h"
 
@@ -39,12 +41,11 @@ void PrintPgm(Pgm *);
 void stripwhite(char *);
 void execute(Pgm* pgm, int bg, int doPipe);
 void signalHandler(int signalNumber);
+void changeDirectory(char* arg);
 /* When non-zero, this global means the user is done using this program. */
 int done = 0;
 int real_stdout;
 int real_stdin;
-int pid = 0;
-int executing = 0;
 /*
  * Name: main
  *
@@ -195,18 +196,6 @@ stripwhite (char *string)
   string [++i] = '\0';
 }
 
-//Depricated method to search for a binary in a path
-int fileExists(char* path, char* binaryName)
-{
-	// Concatenate arguments and check with access
-	if(path == NULL) return 0;
-	char fPath[strlen(path)+strlen(binaryName)];
-	strcat(fPath, path);
-	strcat(fPath, "/");
-	strcat(fPath, binaryName);
-	return access(fPath, F_OK);
-}
-
 //Execute is called recursivly by to first execute the last pgmlist in a chain of pgm. 
 void execute(Pgm* pgm, int bg, int doPipe)
 {
@@ -223,7 +212,7 @@ void execute(Pgm* pgm, int bg, int doPipe)
 	if(doPipe) pipe(pipefd);
 	
 	//Fork and execute
-	switch(pid=fork())
+	switch(fork())
 	{
 	case -1:
 	// ERROR
@@ -248,16 +237,14 @@ void execute(Pgm* pgm, int bg, int doPipe)
 	execvp(*(pgm->pgmlist), pgm->pgmlist);
 	//If exec fails, print error and exit the child process.
 	perror("Execute failed");
-	exit(0);
+	exit(EXIT_FAILURE);
 	    break;
 	default: 
 	// PARENT
 		if(!bg) 
 		{
 			//If not in background, wait for the child process to finish.
-			executing = 1;
 			wait(NULL);
-			executing = 0;
 		}
 		if(doPipe)
 		{
@@ -294,7 +281,12 @@ void signalHandler(int signalNumber)
 //Custom method to handle the 'cd' command. Takes the arguments of the command as input.
 void changeDirectory(char* arg)
 {
-	if(strcmp("..",arg) == 0)
+	if ('\0' == arg || '~' == *arg)
+	{
+		struct passwd *pw = getpwuid(getuid());
+		chdir(pw->pw_dir);
+	}
+	else if(strcmp("..",arg) == 0)
 	{
 		//.. = move to prev directory
 		//Extract the current directory
@@ -318,7 +310,8 @@ void changeDirectory(char* arg)
 	else if('/' == *arg)
 	{
 		//If the first char in the argument is / then an exact path is given from root. Simply set the new dir to that path.
-		chdir(arg);
+		if (chdir(arg) < 0) perror("Change dir failed");
+		
 	}
 	else
 	{
@@ -327,9 +320,7 @@ void changeDirectory(char* arg)
 		getcwd(nPath, sizeof(nPath));
 		strcat(nPath, "/");
 		strcat(nPath, arg);
-		int status = chdir(nPath);
-		if(status<0)
-			perror("Change dir failed");
+		if(chdir(nPath) < 0) perror("Change dir failed");
 	}
 
 }
