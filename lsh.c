@@ -55,10 +55,11 @@ int main(void)
 {
   Command cmd;
   int n;
+  //Save STDIN/OUT
   real_stdin = dup(STDIN_FILENO);
   real_stdout = dup(STDOUT_FILENO);
-
-   signal(SIGCHLD, signalHandler);
+  //Redirect signals to custom handler.
+  signal(SIGCHLD, signalHandler);
   signal(SIGINT, signalHandler);
   while (!done) {
    
@@ -90,31 +91,32 @@ int main(void)
 			if(strcmp("cd",*cmd.pgm->pgmlist)==0)
 			{
 				changeDirectory(*(++cmd.pgm->pgmlist));
-				continue;
-			}
-			if(strcmp("exit",*cmd.pgm->pgmlist)==0)
+			} else if(strcmp("exit",*cmd.pgm->pgmlist)==0)
 			{
 				exit(0);
-			}
-			FILE *input = NULL;
-			FILE *output= NULL;
-			if(cmd.rstdin)
+			} else 
 			{
-				input = fopen(cmd.rstdin, "r");
-				dup2(fileno(input), STDIN_FILENO );
+				//Execute command
+				FILE *input = NULL;
+				FILE *output= NULL;
+				if(cmd.rstdin)
+				{
+					input = fopen(cmd.rstdin, "r");
+					dup2(fileno(input), STDIN_FILENO );
 
-			}
-			if(cmd.rstdout) 
-			{
-				output = fopen(cmd.rstdout, "w");
-				dup2(fileno(output), STDOUT_FILENO);
+				}
+				if(cmd.rstdout) 
+				{
+					output = fopen(cmd.rstdout, "w");
+					dup2(fileno(output), STDOUT_FILENO);
 
+				}
+				execute(cmd.pgm, cmd.bakground, 0);
+				if(input)  fclose(input);
+				if(output) fclose(output);
 			}
-			execute(cmd.pgm, cmd.bakground, 0);
-			if(input)  fclose(input);
-			if(output) fclose(output);
 		}	
-         }
+	  }
     }
     
     if(line) {
@@ -193,6 +195,7 @@ stripwhite (char *string)
   string [++i] = '\0';
 }
 
+//Depricated method to search for a binary in a path
 int fileExists(char* path, char* binaryName)
 {
 	// Concatenate arguments and check with access
@@ -204,49 +207,61 @@ int fileExists(char* path, char* binaryName)
 	return access(fPath, F_OK);
 }
 
-
+//Execute is called recursivly by to first execute the last pgmlist in a chain of pgm. 
 void execute(Pgm* pgm, int bg, int doPipe)
 {
+	//If pgm is null then the prev pgm was the last pgm in the list. Return and start execute the prev pgm.
 	if (pgm == NULL)
 	{
 		return;
 	}
+	//Recursivly call the next pgm until the last is found. If there are several pgm in the command all but the first should pipe.
 	execute(pgm->next, bg, 1);
 
+	//Setup the pipe variable but only create a pipe if doPipe is true.
 	int pipefd[2];
 	if(doPipe) pipe(pipefd);
 	
+	//Fork and execute
 	switch(pid=fork())
 	{
 	case -1:
 	// ERROR
-	
+		perror("Fork failed");
 	    break;
 	case 0:
 	// CHILD
 	
 	if(doPipe)
 	{
+		//The the information is suposed to be piped, channel STDOUT to the write end of the pipe.
 		close(1);
 		close(pipefd[0]);
 		dup2(pipefd[1], 1);
 		close(pipefd[1]);	
 	}
-	
-	if(bg) setsid(); 
+	//Check if the process is supposed to run in background, if so decouple the child process from the main process tree.
+	if(bg) {
+		setsid(); 
+	}
+	//Execute the command. Using a exec with p to search the path was OK according to supervisor. (We originally searched path manually)
 	execvp(*(pgm->pgmlist), pgm->pgmlist);
+	//If exec fails, print error and exit the child process.
+	perror("Execute failed");
 	exit(0);
 	    break;
 	default: 
 	// PARENT
 		if(!bg) 
 		{
+			//If not in background, wait for the child process to finish.
 			executing = 1;
-			waitpid(pid);
+			wait(NULL);
 			executing = 0;
 		}
 		if(doPipe)
 		{
+			//If the information is piped, channel STDIN to the pipe.
 			close(pipefd[1]);
 			dup2(pipefd[0], STDIN_FILENO);
 			close(pipefd[0]);
@@ -254,13 +269,14 @@ void execute(Pgm* pgm, int bg, int doPipe)
 		}
 		else
 		{
+			//Reset STDIN/OUT to point to original input output incae they were changed by pipe.
 			dup2(real_stdin, STDIN_FILENO );
 			dup2(real_stdout, STDOUT_FILENO);
 		}
 	}
 
 }
-
+//Custom signal handler to that proccess SIGCHLD from background processes in order to avoid zombies.
 void signalHandler(int signalNumber)
 {
 	switch(signalNumber)
@@ -269,17 +285,22 @@ void signalHandler(int signalNumber)
 		wait(NULL);
 		break;
 	default:
+		//Do nothing on other signals. 
+		//If SIGINT is received it will be ignored in order to not kill the shell. Although it will kill child processes not run in background as per default behavior of SIGINT.
 		break;
-		//Not implemented
 	}
 }
 
+//Custom method to handle the 'cd' command. Takes the arguments of the command as input.
 void changeDirectory(char* arg)
 {
 	if(strcmp("..",arg) == 0)
 	{
+		//.. = move to prev directory
+		//Extract the current directory
 		char cwd[1024];
 		getcwd(cwd, sizeof(cwd));
+		//Find the last instance of '/'
 		char *ptr = cwd;
 		int last=0;
 		while(*ptr!='\0')
@@ -288,23 +309,27 @@ void changeDirectory(char* arg)
 				last = ptr-cwd;
 			ptr++;
 		}
+		//Replace the last instance of '/' with '\0' in order to shorten the path to the prev directory.
 		cwd[last] = '\0';
+		//Set the new dir
 		chdir(cwd);
 
 	}
 	else if('/' == *arg)
 	{
+		//If the first char in the argument is / then an exact path is given from root. Simply set the new dir to that path.
 		chdir(arg);
 	}
 	else
 	{
+		//Else the argument given is the folder to move into, concatenate the folder name to the current path and change dirr.
 		char nPath[1024];
 		getcwd(nPath, sizeof(nPath));
 		strcat(nPath, "/");
 		strcat(nPath, arg);
 		int status = chdir(nPath);
-		if(status) 
-			fprintf(stderr, "lsh: cd: %s: No such file or directory\n", arg);
+		if(status<0)
+			perror("Change dir failed");
 	}
 
 }
