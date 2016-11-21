@@ -29,7 +29,6 @@
 #include <sys/types.h>
 //Include pwd.h to get home dir
 #include <pwd.h>
-//END
 #include "parse.h"
 
 /*
@@ -231,7 +230,7 @@ void execute(Pgm* pgm, int bg, int doPipe)
 	}
 	//Check if the process is supposed to run in background, if so decouple the child process from the main process tree.
 	if(bg) {
-		setsid(); 
+		setsid();
 	}
 	//Execute the command. Using a exec with p to search the path was OK according to supervisor. (We originally searched path manually)
 	execvp(*(pgm->pgmlist), pgm->pgmlist);
