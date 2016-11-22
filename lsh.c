@@ -270,7 +270,6 @@ void signalHandler(int signalNumber)
 	{
 	case SIGCHLD:
 		waitpid(-1, NULL, WNOHANG);
-		//wait(NULL);
 		break;
 	default:
 		//Do nothing on other signals. 
