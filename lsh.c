@@ -27,6 +27,7 @@
 #include <signal.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 //Include pwd.h to get home dir
 #include <pwd.h>
 #include "parse.h"
@@ -268,7 +269,8 @@ void signalHandler(int signalNumber)
 	switch(signalNumber)
 	{
 	case SIGCHLD:
-		wait(NULL);
+		waitpid(-1, NULL, WNOHANG);
+		//wait(NULL);
 		break;
 	default:
 		//Do nothing on other signals. 
